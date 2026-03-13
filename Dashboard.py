@@ -1,0 +1,793 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+# Compatibility shim for older Plotly/xarray stacks on NumPy 2.x.
+if not hasattr(np, "unicode_"):
+    np.unicode_ = np.str_
+
+import plotly.express as px
+
+# ------------------------------------------------
+# PAGE CONFIG
+# ------------------------------------------------
+st.set_page_config(page_title="Airline Passenger Analysis", layout="wide")
+
+st.title("✈ Airline Passenger Preference Dashboard")
+
+# ------------------------------------------------
+# LOAD DATA
+# ------------------------------------------------
+@st.cache_data
+def load_data():
+    data_path = Path(__file__).resolve().parent / "combined_dataset_cleaned.csv"
+    df = pd.read_csv(data_path)
+
+    # Convert Travel_Frequency to numeric for KPI
+    mapping = {
+        "0 flight": 0,
+        "1 flight": 1,
+        "2-3 flights": 2.5,
+        "4-6 flights": 5,
+        "7-10 flights": 8.5,
+        "More than 10 flight": 12
+    }
+
+    df["Travel_Frequency_Numeric"] = df["Travel_Frequency"].map(mapping)
+
+    return df
+
+df = load_data()
+
+
+@st.cache_data
+def load_segmentation_data():
+    data_path = Path(__file__).resolve().parent / "airline_segmentation_ready.csv"
+    return pd.read_csv(data_path)
+
+
+def run_kmeans(data, n_clusters, random_state=42, n_init=10, max_iter=100):
+    X = np.asarray(data, dtype=float)
+    rng = np.random.default_rng(random_state)
+
+    best_labels = None
+    best_centers = None
+    best_inertia = np.inf
+
+    for _ in range(n_init):
+        initial_idx = rng.choice(len(X), size=n_clusters, replace=False)
+        centers = X[initial_idx].copy()
+
+        for _ in range(max_iter):
+            distances = np.linalg.norm(X[:, None, :] - centers[None, :, :], axis=2)
+            labels = distances.argmin(axis=1)
+
+            new_centers = centers.copy()
+            for cluster_id in range(n_clusters):
+                members = X[labels == cluster_id]
+                if len(members) == 0:
+                    new_centers[cluster_id] = X[rng.integers(0, len(X))]
+                else:
+                    new_centers[cluster_id] = members.mean(axis=0)
+
+            if np.allclose(new_centers, centers):
+                centers = new_centers
+                break
+
+            centers = new_centers
+
+        final_distances = np.linalg.norm(X[:, None, :] - centers[None, :, :], axis=2)
+        final_labels = final_distances.argmin(axis=1)
+        inertia = np.sum((X - centers[final_labels]) ** 2)
+
+        if inertia < best_inertia:
+            best_inertia = inertia
+            best_labels = final_labels
+            best_centers = centers.copy()
+
+    return best_labels, best_centers, best_inertia
+
+
+def run_pca(data, n_components=2):
+    X = np.asarray(data, dtype=float)
+    X_centered = X - X.mean(axis=0)
+
+    _, singular_values, vt = np.linalg.svd(X_centered, full_matrices=False)
+    components = X_centered @ vt[:n_components].T
+
+    explained_variance = (singular_values ** 2) / max(len(X) - 1, 1)
+    total_variance = explained_variance.sum()
+
+    if total_variance == 0:
+        explained_ratio = np.zeros(n_components)
+    else:
+        explained_ratio = explained_variance[:n_components] / total_variance
+
+    return components, explained_ratio
+
+
+def prettify_feature_name(feature_name):
+    label = str(feature_name).replace("_", " ").replace(";", "")
+    replacements = {
+        "Purpose of Travel ": "",
+        "Influencing Factors ": "",
+        "Reward Preference ": "",
+        "Inflight Priority ": "",
+        "Travel Frequency ": "",
+        "Travel Class ": "",
+        "Flight Preference ": "",
+        "Booking Mode ": "",
+        "Price Sensitivity ": "",
+        "Loyalty Program ": "",
+        "Schedule Preference ": "",
+        "e.g": "eg",
+    }
+
+    for old, new in replacements.items():
+        label = label.replace(old, new)
+
+    return label.strip().title()
+
+# ------------------------------------------------
+# SIDEBAR NAVIGATION
+# ------------------------------------------------
+st.sidebar.title("Navigation")
+page = st.sidebar.radio(
+    "Go to",
+    ["Overview",
+     "Demographics",
+     "Travel Behavior",
+     "Price & Loyalty",
+     "Airline & Sentiment",
+     "Customer Segmentation"]
+)
+
+# =================================================
+# 1 OVERVIEW PAGE
+# =================================================
+if page == "Overview":
+
+    st.subheader("Executive Summary")
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Total Passengers", len(df))
+
+    col2.metric("Avg Travel Frequency",
+                round(df["Travel_Frequency_Numeric"].mean(), 2))
+
+    loyalty_status = df["Loyalty_Program"].astype(str).str.strip().str.lower()
+    loyalty_rate = (loyalty_status == "yes").mean() * 100
+    col3.metric("Loyalty Enrollment %",
+                round(loyalty_rate, 2))
+
+    st.info("""
+        Key Insight:
+    Majority passengers fall in mid travel frequency range.
+    Loyalty enrollment is moderate and concentrated in premium travelers.
+    """)
+
+# =================================================
+# 2 DEMOGRAPHICS PAGE
+# =================================================
+elif page == "Demographics":
+
+    st.subheader("Passenger Demographics Analysis")
+
+    col1, col2 = st.columns(2)
+
+    # -----------------------------
+    # Gender Distribution (Donut Chart)
+    # -----------------------------
+    with col1:
+        fig1 = px.pie(
+            df,
+            names="Gender",
+            hole=0.5,
+            title="Gender Distribution"
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+
+    # -----------------------------
+    # Age Distribution (Box Plot)
+    # -----------------------------
+    with col2:
+        fig2 = px.box(
+            df,
+            y="Age",
+            title="Age Distribution"
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    # -----------------------------
+    # Occupation Distribution (Clean Fix)
+    # -----------------------------
+    occupation_counts = df["Occupation"].value_counts().reset_index()
+    occupation_counts.columns = ["Occupation", "Count"]
+
+    fig3 = px.bar(
+        occupation_counts,
+        x="Occupation",
+        y="Count",
+        color="Occupation",
+        title="Occupation Distribution"
+    )
+
+    st.plotly_chart(fig3, use_container_width=True)
+
+    # -----------------------------
+    # Travel Class by Gender (Stacked Bar)
+    # -----------------------------
+    fig4 = px.histogram(
+        df,
+        x="Travel_Class",
+        color="Gender",
+        barmode="group",
+        title="Travel Class by Gender"
+    )
+
+    st.plotly_chart(fig4, use_container_width=True)
+
+    st.info("""
+     Insights:
+    • Majority passengers belong to working professionals.
+    • Travel class preferences vary across gender segments.
+    • Age distribution shows strong concentration in active workforce.
+    """)
+
+# =================================================
+# 3. TRAVEL BEHAVIOR PAGE
+# =================================================
+elif page == "Travel Behavior":
+
+    st.subheader("✈ Travel Behavior Analysis")
+
+    col1, col2 = st.columns(2)
+
+    # -----------------------------
+    # Travel Frequency (Horizontal Bar)
+    # -----------------------------
+    with col1:
+        tf_counts = df["Travel_Frequency"].value_counts().reset_index()
+        tf_counts.columns = ["Travel_Frequency", "Count"]
+
+        fig1 = px.bar(
+            tf_counts.sort_values("Count"),
+            x="Count",
+            y="Travel_Frequency",
+            orientation="h",
+            color="Travel_Frequency",
+            title="Travel Frequency Distribution"
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+
+    # -----------------------------
+    # Travel Class (Donut Chart)
+    # -----------------------------
+    with col2:
+        fig2 = px.pie(
+            df,
+            names="Travel_Class",
+            hole=0.5,
+            title="Travel Class Distribution"
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    # -----------------------------
+    # Purpose of Travel (Fixed Properly)
+    # -----------------------------
+    import re
+
+    def clean_purpose(text):
+        text = str(text).lower()
+        parts = re.split(r',|/|;|-', text)
+        return [p.strip() for p in parts]
+
+    df["Purpose_Clean"] = df["Purpose_of_Travel"].apply(clean_purpose)
+    df_exploded = df.explode("Purpose_Clean")
+
+    # Define main categories only
+    def map_category(x):
+        if "business" in x:
+            return "Business"
+        elif "leisure" in x:
+            return "Leisure"
+        elif "family" in x:
+            return "Family Visit"
+        elif "education" in x:
+            return "Education"
+        elif "medical" in x:
+            return "Medical"
+        else:
+            return "Others"
+
+    df_exploded["Purpose_Grouped"] = df_exploded["Purpose_Clean"].apply(map_category)
+
+    # Count only grouped categories
+    purpose_counts = (
+        df_exploded["Purpose_Grouped"]
+        .value_counts()
+        .reset_index()
+    )
+
+    purpose_counts.columns = ["Purpose", "Count"]
+
+    # -----------------------------
+    # CLEAN BAR CHART
+    # -----------------------------
+    fig = px.bar(
+        purpose_counts.sort_values("Count"),
+        x="Count",
+        y="Purpose",
+        orientation="h",
+        color="Purpose",
+        title="Purpose of Travel (Cleaned Categories)"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # -----------------------------
+    # Travel Class vs Purpose (Stacked)
+    # -----------------------------
+    import re
+
+    def clean_purpose(text):
+        text = str(text).lower()
+        # split by comma, slash, semicolon
+        parts = re.split(r',|/|;', text)
+        return [p.strip() for p in parts]
+
+    df["Purpose_Clean"] = df["Purpose_of_Travel"].apply(clean_purpose)
+    df_exploded = df.explode("Purpose_Clean")
+
+    # Standardize main categories
+    main_categories = {
+        "business": "Business",
+        "leisure": "Leisure",
+        "family visit": "Family Visit",
+        "education": "Education",
+        "medical": "Medical"
+    }
+
+    def map_category(x):
+        for key in main_categories:
+            if key in x:
+                return main_categories[key]
+        return "Others"
+
+    df_exploded["Purpose_Grouped"] = df_exploded["Purpose_Clean"].apply(map_category)
+
+    # -----------------------------
+    # COUNT ONLY MAIN GROUPS
+    # -----------------------------
+    purpose_counts = (
+        df_exploded.groupby(["Purpose_Grouped", "Travel_Class"])
+        .size()
+        .reset_index(name="Count")
+    )
+
+    # -----------------------------
+    # CLEAN GROUPED BAR CHART
+    # -----------------------------
+    fig4 = px.bar(
+        purpose_counts,
+        x="Purpose_Grouped",
+        y="Count",
+        color="Travel_Class",
+        barmode="group",
+        title="Purpose vs Travel Class"
+    )
+
+    st.plotly_chart(fig4, use_container_width=True)
+
+    st.success("""
+     Business Insights:
+    • Majority passengers travel for business and leisure.
+    • Economy dominates across most purposes.
+    • Premium travel is concentrated among business travelers.
+    """)
+
+# =================================================
+# 4. PRICE & LOYALTY PAGE
+# =================================================
+elif page == "Price & Loyalty":
+
+    st.subheader("  Price Sensitivity & Loyalty")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        fig1 = px.histogram(df,
+                            x="Price_Sensitivity",
+                            title="Price Sensitivity Distribution")
+        st.plotly_chart(fig1, use_container_width=True)
+
+    with col2:
+        fig2 = px.histogram(df,
+                            x="Price_Sensitivity",
+                            color="Loyalty_Program",
+                            barmode="group",
+                            title="Price Sensitivity vs Loyalty")
+        st.plotly_chart(fig2, use_container_width=True)
+
+    fig3 = px.histogram(df,
+                        x="Travel_Class",
+                        color="Loyalty_Program",
+                        barmode="group",
+                        title="Travel Class vs Loyalty")
+    st.plotly_chart(fig3, use_container_width=True)
+
+    st.success("""
+    Business Insight:
+    • Lower price sensitivity passengers show higher loyalty.
+    • Business & Premium class customers are more likely to enroll in loyalty programs.
+    """)
+
+# =================================================
+# 5️. AIRLINE & SENTIMENT PAGE
+# =================================================
+elif page == "Airline & Sentiment":
+
+    st.subheader("Airline Preference Analysis")
+    st.caption("Using the available columns from your combined dataset: `Airline_Last_Flown`, `Travel_Class`, and `Loyalty_Program`.")
+
+    import re
+
+    col1, col2 = st.columns(2)
+
+    airline_source_col = None
+    for candidate in ["Airline_List", "Airline_Last_Flown"]:
+        if candidate in df.columns:
+            airline_source_col = candidate
+            break
+
+    # -----------------------------
+    # CLEAN AIRLINE DATA
+    # -----------------------------
+    def clean_airline(text):
+        text = str(text).lower()
+        text = re.sub(r'[\[\]\']', '', text)
+        parts = re.split(r',|;', text)
+        return [p.strip() for p in parts if p.strip()]
+
+    if airline_source_col is None:
+        st.error("No airline column was found in the dataset.")
+        st.stop()
+
+    df["Airline_Clean"] = df[airline_source_col].apply(clean_airline)
+    df_airline = df.explode("Airline_Clean")
+
+    def map_airline(x):
+        if "indigo" in x:
+            return "IndiGo"
+        elif "air_india" in x or "air india" in x:
+            return "Air India"
+        elif "vistara" in x:
+            return "Vistara"
+        elif "spicejet" in x:
+            return "SpiceJet"
+        elif "akasa" in x:
+            return "Akasa"
+        else:
+            return "Other"
+
+    df_airline["Airline_Grouped"] = df_airline["Airline_Clean"].apply(map_airline)
+
+    airline_counts = (
+        df_airline["Airline_Grouped"]
+        .value_counts()
+        .reset_index()
+    )
+
+    airline_counts.columns = ["Airline", "Count"]
+
+    # -----------------------------
+    # Airline Preference Chart
+    # -----------------------------
+    with col1:
+        fig1 = px.bar(
+            airline_counts.sort_values("Count"),
+            x="Count",
+            y="Airline",
+            orientation="h",
+            color="Airline",
+            title="Airline Preference "
+        )
+        fig1.update_layout(showlegend=False)
+        st.plotly_chart(fig1, use_container_width=True)
+
+   # -----------------------------
+    # SECONDARY ANALYSIS
+    # -----------------------------
+    if "Sentiment_Label" in df.columns:
+
+        with col2:
+            fig2 = px.pie(
+                df,
+                names="Sentiment_Label",
+                hole=0.5,
+                title="Overall Sentiment"
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+        # Airline vs Sentiment
+        df_sentiment = df_airline.copy()
+
+        fig3 = px.histogram(
+            df_sentiment,
+            x="Airline_Grouped",
+            color="Sentiment_Label",
+            barmode="group",
+            title="Airline vs Sentiment"
+        )
+
+        st.plotly_chart(fig3, use_container_width=True)
+
+        st.info("""
+         Insights:
+        • Market share is dominated by top airlines.
+        • Positive sentiment varies by airline.
+        • Operational consistency strongly affects brand perception.
+        """)
+    else:
+        with col2:
+            travel_class_by_airline = (
+                df_airline.groupby(["Airline_Grouped", "Travel_Class"])
+                .size()
+                .reset_index(name="Count")
+            )
+
+            fig2 = px.bar(
+                travel_class_by_airline,
+                x="Airline_Grouped",
+                y="Count",
+                color="Travel_Class",
+                barmode="group",
+                title="Airline Preference by Travel Class"
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+        if "Loyalty_Program" in df_airline.columns:
+            loyalty_by_airline = (
+                df_airline.groupby(["Airline_Grouped", "Loyalty_Program"])
+                .size()
+                .reset_index(name="Count")
+            )
+
+            fig3 = px.bar(
+                loyalty_by_airline,
+                x="Airline_Grouped",
+                y="Count",
+                color="Loyalty_Program",
+                barmode="group",
+                title="Airline vs Loyalty Program"
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+
+        st.warning("`Sentiment_Label` is not present in your combined dataset, so this page uses the available airline, travel class, and loyalty columns instead.")
+
+        st.info("""
+         Insights:
+        • IndiGo and Air India appear most often in recent flown-airline records.
+        • Travel class mix helps compare premium versus budget airline positioning.
+        • Loyalty behavior still provides useful airline-level business insight without sentiment labels.
+        """)
+
+# =================================================
+# 6. Customer Segmentation
+# =================================================
+elif page == "Customer Segmentation":
+
+    st.subheader("Interactive Customer Segmentation")
+
+    st.markdown("""
+    Explore airline customer segments using **K-Means clustering**. Adjust the inputs below to compare
+    how traveler behavior, loyalty, price sensitivity, and service preferences shape each segment.
+    """)
+
+    df_seg = load_segmentation_data()
+
+    feature_groups = {
+        "Travel Purpose": [
+            "business", "leisure", "family_visit", "education", "medical", "others"
+        ],
+        "Influencing Factors": [
+            "Influencing_Factors_brand_reputation",
+            "Influencing_Factors_free_food",
+            "Influencing_Factors_in_flight_service_quality",
+            "Influencing_Factors_loyalty_programs",
+            "Influencing_Factors_punctuality",
+            "Influencing_Factors_safety_rating",
+            "Influencing_Factors_seat_comfort",
+            "Influencing_Factors_ticket_price"
+        ],
+        "Reward Preferences": [
+            "Reward_Preference_cashback_or_discount",
+            "Reward_Preference_extra_baggage",
+            "Reward_Preference_free_flights",
+            "Reward_Preference_free_lounge_access",
+            "Reward_Preference_free_seat_upgrades",
+            "Reward_Preference_priority_check-in/boarding"
+        ],
+        "In-Flight Priorities": [
+            "Inflight_Priority_amenities(e.g_charging_ports,_eye-mask,_blankets)",
+            "Inflight_Priority_cabin_crew_behavior",
+            "Inflight_Priority_extra_baggage_facility",
+            "Inflight_Priority_extra_legroom",
+            "Inflight_Priority_in-flight_entertainment",
+            "Inflight_Priority_seat_comfort"
+        ],
+        "Travel Habits & Loyalty": [
+            "Travel_Frequency_1 flight",
+            "Travel_Frequency_2-3 flights",
+            "Travel_Frequency_4-6 flights",
+            "Travel_Frequency_7-10 flights",
+            "Travel_Frequency_more than 10 flight",
+            "Travel_Class_economy",
+            "Travel_Class_first class",
+            "Travel_Class_premium economy",
+            "Price_Sensitivity_somewhat sensitive",
+            "Price_Sensitivity_very sensitive",
+            "Loyalty_Program_planning to join",
+            "Loyalty_Program_yes"
+        ]
+    }
+
+    default_groups = [
+        "Travel Purpose",
+        "Influencing Factors",
+        "Reward Preferences",
+        "Travel Habits & Loyalty"
+    ]
+
+    control_col1, control_col2, control_col3 = st.columns([1.3, 1, 1])
+
+    with control_col1:
+        selected_groups = st.multiselect(
+            "Feature groups",
+            options=list(feature_groups.keys()),
+            default=default_groups
+        )
+
+    with control_col2:
+        n_clusters = st.slider("Number of clusters", min_value=2, max_value=8, value=4)
+
+    with control_col3:
+        random_state = st.selectbox("Random seed", options=[42, 7, 21, 99], index=0)
+
+    selected_features = [
+        column
+        for group in selected_groups
+        for column in feature_groups[group]
+        if column in df_seg.columns
+    ]
+
+    if len(selected_features) < 2:
+        st.warning("Select at least one feature group with two or more columns to run clustering.")
+    else:
+        seg_input = df_seg[selected_features].copy()
+        clusters, _, _ = run_kmeans(
+            seg_input,
+            n_clusters=n_clusters,
+            random_state=random_state,
+            n_init=10
+        )
+
+        seg_result = seg_input.copy()
+        seg_result["Cluster"] = clusters
+        seg_result["Customer_ID"] = np.arange(1, len(seg_result) + 1)
+
+        components, explained_ratio = run_pca(seg_input, n_components=2)
+        seg_result["PCA_1"] = components[:, 0]
+        seg_result["PCA_2"] = components[:, 1]
+
+        cluster_counts = (
+            seg_result["Cluster"]
+            .value_counts()
+            .sort_index()
+            .rename_axis("Cluster")
+            .reset_index(name="Customers")
+        )
+        cluster_counts["Cluster Label"] = cluster_counts["Cluster"].apply(lambda x: f"Cluster {x}")
+        cluster_counts["Share %"] = (cluster_counts["Customers"] / len(seg_result) * 100).round(1)
+
+        profile_means = seg_result.groupby("Cluster")[selected_features].mean()
+        overall_means = seg_input.mean()
+        differentiators = profile_means.sub(overall_means, axis=1)
+
+        top_traits = []
+        for cluster_id in differentiators.index:
+            strongest = differentiators.loc[cluster_id].abs().sort_values(ascending=False).head(3).index
+            labels = [prettify_feature_name(feature) for feature in strongest]
+            top_traits.append(", ".join(labels))
+
+        profile_summary = cluster_counts.copy()
+        profile_summary["Top differentiators"] = top_traits
+
+        metric1, metric2, metric3 = st.columns(3)
+        metric1.metric("Customers Segmented", len(seg_result))
+        metric2.metric("Features Used", len(selected_features))
+        metric3.metric("PCA Variance Explained", f"{(explained_ratio.sum() * 100):.1f}%")
+
+        col1, col2 = st.columns([1, 1.4])
+
+        with col1:
+            fig_count = px.bar(
+                cluster_counts,
+                x="Cluster Label",
+                y="Customers",
+                color="Cluster Label",
+                text="Share %",
+                title="Cluster Distribution"
+            )
+            fig_count.update_traces(texttemplate="%{text}%", textposition="outside")
+            fig_count.update_layout(showlegend=False, yaxis_title="Customers", xaxis_title="")
+            st.plotly_chart(fig_count, use_container_width=True)
+
+        with col2:
+            fig_pca = px.scatter(
+                seg_result,
+                x="PCA_1",
+                y="PCA_2",
+                color=seg_result["Cluster"].astype(str),
+                hover_data={
+                    "Customer_ID": True,
+                    "Cluster": True,
+                    "PCA_1": ":.2f",
+                    "PCA_2": ":.2f"
+                },
+                title="Customer Segments in 2D PCA Space",
+                labels={"color": "Cluster"}
+            )
+            st.plotly_chart(fig_pca, use_container_width=True)
+
+        st.subheader("Segment Profiles")
+        profile_summary_display = profile_summary[["Cluster Label", "Customers", "Share %", "Top differentiators"]].copy()
+        profile_summary_display["Share %"] = profile_summary_display["Share %"].map(lambda x: f"{x:.1f}%")
+        st.table(profile_summary_display)
+
+        focus_cluster = st.selectbox(
+            "Inspect a cluster",
+            options=sorted(seg_result["Cluster"].unique()),
+            format_func=lambda x: f"Cluster {x}"
+        )
+
+        focus_profile = (
+            profile_means.loc[focus_cluster]
+            .sort_values(ascending=False)
+            .head(10)
+            .reset_index()
+        )
+        focus_profile.columns = ["Feature", "Average Score"]
+        focus_profile["Feature"] = focus_profile["Feature"].apply(prettify_feature_name)
+
+        fig_profile = px.bar(
+            focus_profile.sort_values("Average Score"),
+            x="Average Score",
+            y="Feature",
+            orientation="h",
+            color="Average Score",
+            title=f"Top Features for Cluster {focus_cluster}"
+        )
+        st.plotly_chart(fig_profile, use_container_width=True)
+
+        heatmap_data = profile_means.copy()
+        heatmap_data.index = [f"Cluster {idx}" for idx in heatmap_data.index]
+        top_heatmap_features = differentiators.abs().mean().sort_values(ascending=False).head(10).index.tolist()
+
+        fig_heatmap = px.imshow(
+            heatmap_data[top_heatmap_features],
+            aspect="auto",
+            color_continuous_scale="Blues",
+            labels={"x": "Features", "y": "Cluster", "color": "Avg Score"},
+            title="Cluster Comparison Heatmap"
+        )
+        fig_heatmap.update_xaxes(tickangle=-35)
+        st.plotly_chart(fig_heatmap, use_container_width=True)
+
+        st.info("""
+        Interactive Insight:
+        Modify the feature groups or cluster count to see how customer segments shift. This helps compare
+        whether airline strategy should focus more on travel purpose, service quality, or loyalty behavior.
+        """)
