@@ -1,67 +1,110 @@
 # Passenger Preference Analysis in the Domestic Airline Industry
 
 ## Project Overview
-This project analyzes passenger preferences in the domestic airline industry to understand the key factors influencing airline selection and customer satisfaction. The study uses survey data and customer feedback to identify how factors such as ticket price, travel frequency, service quality, and loyalty programs influence traveler decisions.
+This project examines passenger preferences in the domestic airline industry using survey data. The analysis focuses on the factors that influence airline selection, including demographics, travel habits, price sensitivity, loyalty program participation, and service-related preferences.
 
-The project also includes an interactive **Streamlit dashboard** to visualize insights and explore passenger behavior patterns.
-
----
+The project also includes a Streamlit dashboard for presenting the analysis in an interactive format.
 
 ## Objectives
-- Identify key factors influencing airline choice
+- Identify the main factors influencing airline choice
 - Analyze passenger demographics and travel behavior
-- Evaluate loyalty program participation
-- Discover patterns in passenger preferences
-- Provide actionable insights for airline strategy
+- Study the relationship between price sensitivity and loyalty
+- Segment passengers based on preference patterns
+- Compare airline-specific drivers of customer choice
+- Present the findings through a dashboard
 
----
+## Project Structure
+```text
+Passenger-Preference-Analysis/
+|-- Dashboard.py
+|-- combined_dataset_cleaned.csv
+|-- airline_segmentation_ready.csv
+|-- airline_model_ready.csv
+|-- requirements.txt
+|-- Group_3_Airline.pdf
+|-- README.md
+`-- ML_Engg/
+    |-- descriptive_analytics.ipynb
+    |-- predictive_modelling.ipynb
+    `-- segmentation_ready.ipynb
+```
 
 ## Dataset
-The dataset was collected through an online survey and contains **over 4000 responses** from passengers.
+The project uses cleaned and processed survey data stored in CSV format.
+
+### Files Used
+- `combined_dataset_cleaned.csv` for the main dashboard analysis
+- `airline_segmentation_ready.csv` for customer segmentation
+- `airline_model_ready.csv` for airline-specific driver analysis
+
+### Dataset Size
+- Main dataset: `2099` rows and `28` columns
 
 ### Key Attributes
-- Passenger demographics
+- Gender
+- Age
+- Occupation
+- Purpose of travel
 - Travel frequency
-- Travel class preference
+- Travel class
+- Flight preference
+- Booking mode
 - Price sensitivity
-- Airline preference
 - Loyalty program participation
-- Customer ratings and feedback
-
----
+- Reward preference
+- Schedule preference
+- In-flight priority
+- Airline last flown
 
 ## Methodology
-The project follows a structured data analytics workflow:
+The project follows the steps below:
 
-1. Data Collection (Survey responses)
-2. Data Cleaning and Preprocessing
-3. Exploratory Data Analysis (EDA)
-4. Passenger Segmentation
-5. Insight Generation
-6. Interactive Dashboard Development
+1. Data collection through survey responses
+2. Data cleaning and preprocessing
+3. Exploratory data analysis
+4. Feature preparation
+5. Customer segmentation
+6. Airline-specific analysis
+7. Dashboard development
 
----
+## Dashboard Sections
+The Streamlit dashboard includes the following sections:
 
-## Tools & Technologies
+- `Overview`
+- `Demographics`
+- `Travel Behavior`
+- `Price & Loyalty`
+- `Airline & Sentiment`
+- `Customer Segmentation`
+- `Airline-Specific Drivers`
+
+## Tools and Technologies
 - Python
 - Pandas
-- Scikit-learn
-- Matplotlib
+- NumPy
+- Plotly
 - Streamlit
-- Microsoft Excel
+- Jupyter Notebook
 
----
-
-## Streamlit Dashboard
-An interactive **Streamlit dashboard** is used to visualize the analysis results, including:
-
-- Passenger demographics
-- Travel frequency distribution
-- Price sensitivity analysis
-- Airline preference insights
-- Sentiment and rating analysis
-
-To run the dashboard:
+## How to Run
+Install the required packages:
 
 ```bash
-streamlit run app.py
+pip install -r requirements.txt
+```
+
+Run the Streamlit dashboard from the `Passenger-Preference-Analysis` folder:
+
+```bash
+streamlit run Dashboard.py
+```
+
+## Notebook Files
+The `ML_Engg` folder contains the notebooks used for different stages of the analysis:
+
+- `descriptive_analytics.ipynb`
+- `predictive_modelling.ipynb`
+- `segmentation_ready.ipynb`
+
+## Summary
+This project presents a business analytics study of passenger behavior in the domestic airline industry. It combines data analysis, customer segmentation, and dashboard-based visualization to support interpretation of passenger preferences and airline-related decision factors.
