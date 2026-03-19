@@ -191,11 +191,7 @@ if page == "Overview":
     col3.metric("Loyalty Enrollment %",
                 round(loyalty_rate, 2))
 
-    st.info("""
-        Key Insight:
-    Majority passengers fall in mid travel frequency range.
-    Loyalty enrollment is moderate and concentrated in premium travelers.
-    """)
+    st.info("Key Insight: Majority passengers fall in mid travel frequency range. Loyalty enrollment is moderate and concentrated in premium travelers.")
 
 # =================================================
 # 2 DEMOGRAPHICS PAGE
@@ -258,11 +254,36 @@ elif page == "Demographics":
 
     st.plotly_chart(fig4, use_container_width=True)
 
+    # -----------------------------
+    # Booking Mode by Age Group
+    # -----------------------------
+    booking_age = (
+        df.groupby(["Age", "Booking_Mode"])
+        .size()
+        .reset_index(name="Count")
+    )
+
+    age_order = ["<18", "19-24", "25-34", "35-44", "45-60", "60+"]
+    booking_age["Age"] = pd.Categorical(booking_age["Age"], categories=age_order, ordered=True)
+    booking_age = booking_age.sort_values("Age")
+
+    fig5 = px.bar(
+        booking_age,
+        x="Age",
+        y="Count",
+        color="Booking_Mode",
+        barmode="group",
+        title="Booking Mode by Age Group"
+    )
+    st.plotly_chart(fig5, use_container_width=True)
+
     st.info("""
-     Insights:
-    • Majority passengers belong to working professionals.
-    • Travel class preferences vary across gender segments.
-    • Age distribution shows strong concentration in active workforce.
+    **Insights:**
+    - Majority passengers belong to working professionals.
+    - Gender split is relatively balanced, with males at 57%.
+    - Age distribution is concentrated in the 25-34 active workforce band.
+    - Travel class preferences vary across gender segments.
+    - Younger passengers lean towards third-party booking platforms, while older segments prefer direct airline channels.
     """)
 
 # =================================================
@@ -410,11 +431,65 @@ elif page == "Travel Behavior":
 
     st.plotly_chart(fig4, use_container_width=True)
 
+    # -----------------------------
+    # Influencing Factors Breakdown
+    # -----------------------------
+    import re as re_mod
+
+    def parse_factors(text):
+        text = str(text).lower()
+        text = re_mod.sub(r"[\[\]']", "", text)
+        parts = re_mod.split(r",|;", text)
+        return [p.strip() for p in parts if p.strip()]
+
+    df["Factors_Clean"] = df["Influencing_Factors"].apply(parse_factors)
+    df_factors = df.explode("Factors_Clean")
+
+    factor_counts = (
+        df_factors["Factors_Clean"]
+        .value_counts()
+        .reset_index()
+    )
+    factor_counts.columns = ["Factor", "Count"]
+    factor_counts["Factor"] = factor_counts["Factor"].str.replace("_", " ").str.title()
+
+    fig_factors = px.bar(
+        factor_counts.sort_values("Count"),
+        x="Count",
+        y="Factor",
+        orientation="h",
+        color="Factor",
+        title="Top Influencing Factors for Airline Selection"
+    )
+    fig_factors.update_layout(showlegend=True)
+    st.plotly_chart(fig_factors, use_container_width=True)
+
+    # -----------------------------
+    # Flight Preference by Travel Class
+    # -----------------------------
+    flight_pref = (
+        df.groupby(["Flight_Preference", "Travel_Class"])
+        .size()
+        .reset_index(name="Count")
+    )
+
+    fig_fp = px.bar(
+        flight_pref,
+        x="Flight_Preference",
+        y="Count",
+        color="Travel_Class",
+        barmode="group",
+        title="Flight Preference by Travel Class"
+    )
+    st.plotly_chart(fig_fp, use_container_width=True)
+
     st.success("""
-     Business Insights:
-    • Majority passengers travel for business and leisure.
-    • Economy dominates across most purposes.
-    • Premium travel is concentrated among business travelers.
+    **Business Insights:**
+    - Majority passengers travel for business and leisure purposes.
+    - Economy class dominates across most travel purposes.
+    - Premium travel is concentrated among business travelers.
+    - Ticket price and punctuality are the top factors influencing airline choice.
+    - Direct flights are strongly preferred by premium class travelers.
     """)
 
 # =================================================
@@ -447,10 +522,36 @@ elif page == "Price & Loyalty":
                         title="Travel Class vs Loyalty")
     st.plotly_chart(fig3, use_container_width=True)
 
+    # -----------------------------
+    # Age vs Price Sensitivity (NEW)
+    # -----------------------------
+    age_price = (
+        df.groupby(["Age", "Price_Sensitivity"])
+        .size()
+        .reset_index(name="Count")
+    )
+
+    age_order = ["<18", "19-24", "25-34", "35-44", "45-60", "60+"]
+    age_price["Age"] = pd.Categorical(age_price["Age"], categories=age_order, ordered=True)
+    age_price = age_price.sort_values("Age")
+
+    fig_age_price = px.bar(
+        age_price,
+        x="Age",
+        y="Count",
+        color="Price_Sensitivity",
+        barmode="group",
+        title="Age Group vs Price Sensitivity"
+    )
+    st.plotly_chart(fig_age_price, use_container_width=True)
+
     st.success("""
-    Business Insight:
-    • Lower price sensitivity passengers show higher loyalty.
-    • Business & Premium class customers are more likely to enroll in loyalty programs.
+    **Business Insight:**
+    - Price sensitivity distribution is skewed towards highly sensitive passengers.
+    - Lower price sensitivity passengers show higher loyalty enrollment.
+    - Business and Premium class customers are more likely to enroll in loyalty programs.
+    - The 60+ age group shows the highest price sensitivity.
+    - The 45-60 age group is the least price-sensitive, a sweet spot for premium upselling.
     """)
 
 # =================================================
@@ -553,12 +654,7 @@ elif page == "Airline & Sentiment":
 
         st.plotly_chart(fig3, use_container_width=True)
 
-        st.info("""
-         Insights:
-        • Market share is dominated by top airlines.
-        • Positive sentiment varies by airline.
-        • Operational consistency strongly affects brand perception.
-        """)
+        st.info("**Insights:**\n\n• Market share is dominated by top airlines.\n\n• Positive sentiment varies by airline.\n\n• Operational consistency strongly affects brand perception.")
     else:
         with col2:
             travel_class_by_airline = (
@@ -594,12 +690,7 @@ elif page == "Airline & Sentiment":
             )
             st.plotly_chart(fig3, use_container_width=True)
 
-        st.info("""
-         Insights:
-        • IndiGo and Air India appear most often in recent flown-airline records.
-        • Travel class mix helps compare premium versus budget airline positioning.
-        • Loyalty behavior still provides useful airline-level business insight without sentiment labels.
-        """)
+        st.info("**Insights:**\n\n• IndiGo and Air India appear most often in recent flown-airline records.\n\n• Travel class mix helps compare premium versus budget airline positioning.\n\n• Loyalty behavior still provides useful airline-level business insight without sentiment labels.")
 
 # =================================================
 # 6. Customer Segmentation
@@ -737,6 +828,16 @@ elif page == "Customer Segmentation":
         metric2.metric("Features Used", len(selected_features))
         metric3.metric("PCA Variance Explained", f"{(explained_ratio.sum() * 100):.1f}%")
 
+        # Build a shared colour palette so both charts match
+        _palette = px.colors.qualitative.Plotly
+        unique_clusters = sorted(seg_result["Cluster"].unique())
+        cluster_colors = {
+            f"Cluster {c}": _palette[i % len(_palette)]
+            for i, c in enumerate(unique_clusters)
+        }
+
+        seg_result["Cluster Label"] = seg_result["Cluster"].apply(lambda c: f"Cluster {c}")
+
         col1, col2 = st.columns([1, 1.4])
 
         with col1:
@@ -745,6 +846,7 @@ elif page == "Customer Segmentation":
                 x="Cluster Label",
                 y="Customers",
                 color="Cluster Label",
+                color_discrete_map=cluster_colors,
                 text="Share %",
                 title="Cluster Distribution"
             )
@@ -757,7 +859,8 @@ elif page == "Customer Segmentation":
                 seg_result,
                 x="PCA_1",
                 y="PCA_2",
-                color=seg_result["Cluster"].astype(str),
+                color="Cluster Label",
+                color_discrete_map=cluster_colors,
                 hover_data={
                     "Customer_ID": True,
                     "Cluster": True,
@@ -765,7 +868,7 @@ elif page == "Customer Segmentation":
                     "PCA_2": ":.2f"
                 },
                 title="Customer Segments in 2D PCA Space",
-                labels={"color": "Cluster"}
+                labels={"Cluster Label": "Cluster"}
             )
             st.plotly_chart(fig_pca, use_container_width=True)
 
@@ -815,11 +918,9 @@ elif page == "Customer Segmentation":
         fig_heatmap.update_xaxes(tickangle=-35)
         st.plotly_chart(fig_heatmap, use_container_width=True)
 
-        st.info("""
-        Interactive Insight:
-        Modify the feature groups or cluster count to see how customer segments shift. This helps compare
-        whether airline strategy should focus more on travel purpose, service quality, or loyalty behavior.
-        """)
+        st.info("**Interactive Insight:**\n\nModify the feature groups or cluster count to see how customer segments shift. This helps compare whether airline strategy should focus more on travel purpose, service quality, or loyalty behavior.")
+
+
 
 # =================================================
 # 7. AIRLINE-SPECIFIC DRIVERS
