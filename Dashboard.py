@@ -47,6 +47,12 @@ def load_segmentation_data():
     return pd.read_csv(data_path)
 
 
+@st.cache_data
+def load_model_ready_data():
+    data_path = Path(__file__).resolve().parent / "airline_model_ready.csv"
+    return pd.read_csv(data_path)
+
+
 def run_kmeans(data, n_clusters, random_state=42, n_init=10, max_iter=100):
     X = np.asarray(data, dtype=float)
     rng = np.random.default_rng(random_state)
@@ -129,6 +135,28 @@ def prettify_feature_name(feature_name):
 
     return label.strip().title()
 
+
+def compute_one_vs_rest_driver_scores(dataframe, target_col, airline_id, selected_features):
+    airline_rows = dataframe[dataframe[target_col] == airline_id]
+    other_rows = dataframe[dataframe[target_col] != airline_id]
+
+    if airline_rows.empty or other_rows.empty:
+        return pd.DataFrame(columns=["Feature", "Driver Score", "Airline Avg", "Others Avg", "Direction"])
+
+    airline_mean = airline_rows[selected_features].mean()
+    other_mean = other_rows[selected_features].mean()
+    driver_diff = airline_mean - other_mean
+
+    scores = pd.DataFrame({
+        "Feature": selected_features,
+        "Driver Score": driver_diff.abs().values,
+        "Airline Avg": airline_mean.values,
+        "Others Avg": other_mean.values,
+        "Direction": np.where(driver_diff.values >= 0, "Higher for airline", "Lower for airline")
+    })
+
+    return scores.sort_values("Driver Score", ascending=False)
+
 # ------------------------------------------------
 # SIDEBAR NAVIGATION
 # ------------------------------------------------
@@ -140,7 +168,8 @@ page = st.sidebar.radio(
      "Travel Behavior",
      "Price & Loyalty",
      "Airline & Sentiment",
-     "Customer Segmentation"]
+     "Customer Segmentation",
+     "Airline-Specific Drivers"]
 )
 
 # =================================================
@@ -743,9 +772,11 @@ elif page == "Customer Segmentation":
             st.plotly_chart(fig_pca, use_container_width=True)
 
         st.subheader("Segment Profiles")
-        profile_summary_display = profile_summary[["Cluster Label", "Customers", "Share %", "Top differentiators"]].copy()
-        profile_summary_display["Share %"] = profile_summary_display["Share %"].map(lambda x: f"{x:.1f}%")
-        st.table(profile_summary_display)
+        for _, row in profile_summary.iterrows():
+            st.markdown(
+                f"**{row['Cluster Label']}** | Customers: {int(row['Customers'])} | "
+                f"Share: {row['Share %']:.1f}% | Top differentiators: {row['Top differentiators']}"
+            )
 
         focus_cluster = st.selectbox(
             "Inspect a cluster",
@@ -791,3 +822,198 @@ elif page == "Customer Segmentation":
         Modify the feature groups or cluster count to see how customer segments shift. This helps compare
         whether airline strategy should focus more on travel purpose, service quality, or loyalty behavior.
         """)
+
+# =================================================
+# 7. AIRLINE-SPECIFIC DRIVERS
+# =================================================
+elif page == "Airline-Specific Drivers":
+
+    st.subheader("Interactive Airline-Specific Drivers")
+
+    st.markdown("""
+    Explore the strongest **airline-specific customer drivers** from `airline_model_ready.csv`.
+    This compares each selected airline against all others and highlights the features that stand out most.
+    """)
+
+    df_model = load_model_ready_data()
+
+    airline_mapping = {
+        0: "Air India",
+        1: "Akasa",
+        2: "Indigo",
+        3: "SpiceJet",
+        4: "Vistara"
+    }
+
+    feature_groups = {
+        "Passenger Profile": [
+            "Gender", "Age", "Occupation", "Travel_Frequency", "Travel_Class",
+            "Flight_Preference", "Booking_Mode", "Price_Sensitivity",
+            "Loyalty_Program", "Schedule_Preference"
+        ],
+        "Travel Purpose": [
+            "business", "leisure", "family_visit", "education", "medical"
+        ],
+        "Influencing Factors": [
+            "Influencing_Factors_brand_reputation",
+            "Influencing_Factors_free_food",
+            "Influencing_Factors_in_flight_service_quality",
+            "Influencing_Factors_loyalty_programs",
+            "Influencing_Factors_punctuality",
+            "Influencing_Factors_safety_rating",
+            "Influencing_Factors_seat_comfort",
+            "Influencing_Factors_ticket_price"
+        ],
+        "Reward Preferences": [
+            "Reward_Preference_cashback_or_discount",
+            "Reward_Preference_extra_baggage",
+            "Reward_Preference_free_flights",
+            "Reward_Preference_free_lounge_access",
+            "Reward_Preference_free_seat_upgrades",
+            "Reward_Preference_priority_check-in_boarding"
+        ],
+        "In-Flight Priorities": [
+            "Inflight_Priority_amenitiese.g_charging_ports_eye-mask_blankets",
+            "Inflight_Priority_cabin_crew_behavior",
+            "Inflight_Priority_extra_baggage_facility",
+            "Inflight_Priority_extra_legroom",
+            "Inflight_Priority_in-flight_entertainment",
+            "Inflight_Priority_seat_comfort"
+        ]
+    }
+
+    control_col1, control_col2, control_col3 = st.columns([1.4, 1.2, 1])
+
+    with control_col1:
+        selected_airlines = st.multiselect(
+            "Airlines to compare",
+            options=list(airline_mapping.keys()),
+            default=[2, 3, 4],
+            format_func=lambda x: airline_mapping[x]
+        )
+
+    with control_col2:
+        selected_driver_groups = st.multiselect(
+            "Feature groups",
+            options=list(feature_groups.keys()),
+            default=["Passenger Profile", "Travel Purpose", "Influencing Factors", "Reward Preferences"]
+        )
+
+    with control_col3:
+        top_n = st.slider("Top drivers", min_value=5, max_value=12, value=8)
+
+    selected_features = [
+        column
+        for group in selected_driver_groups
+        for column in feature_groups[group]
+        if column in df_model.columns
+    ]
+
+    if not selected_airlines:
+        st.warning("Select at least one airline to view driver analysis.")
+    elif not selected_features:
+        st.warning("Select at least one feature group to continue.")
+    else:
+        airline_counts = (
+            df_model["Airline_Selected"]
+            .value_counts()
+            .sort_index()
+            .rename_axis("Airline_ID")
+            .reset_index(name="Passengers")
+        )
+        airline_counts["Airline"] = airline_counts["Airline_ID"].map(airline_mapping)
+
+        metric1, metric2, metric3 = st.columns(3)
+        metric1.metric("Airlines Selected", len(selected_airlines))
+        metric2.metric("Features Compared", len(selected_features))
+        metric3.metric("Rows Used", len(df_model))
+
+        fig_distribution = px.pie(
+            airline_counts,
+            names="Airline",
+            values="Passengers",
+            hole=0.45,
+            title="Airline Sample Distribution"
+        )
+        st.plotly_chart(fig_distribution, use_container_width=True)
+
+        summary_rows = []
+        heatmap_rows = []
+
+        for airline_id in selected_airlines:
+            airline_name = airline_mapping.get(airline_id, f"Airline {airline_id}")
+            scores = compute_one_vs_rest_driver_scores(
+                df_model,
+                target_col="Airline_Selected",
+                airline_id=airline_id,
+                selected_features=selected_features
+            ).head(top_n)
+
+            if scores.empty:
+                continue
+
+            scores_display = scores.copy()
+            scores_display["Feature"] = scores_display["Feature"].apply(prettify_feature_name)
+            scores_display["Driver Score"] = scores_display["Driver Score"].round(3)
+            scores_display["Airline Avg"] = scores_display["Airline Avg"].round(3)
+            scores_display["Others Avg"] = scores_display["Others Avg"].round(3)
+
+            summary_rows.append({
+                "Airline": airline_name,
+                "Strongest Driver": scores_display.iloc[0]["Feature"],
+                "Driver Score": scores_display.iloc[0]["Driver Score"]
+            })
+
+            airline_heatmap = scores_display[["Feature", "Driver Score"]].copy()
+            airline_heatmap["Airline"] = airline_name
+            heatmap_rows.append(airline_heatmap)
+
+            st.subheader(f"Top Drivers for {airline_name}")
+
+            fig_driver = px.bar(
+                scores_display.sort_values("Driver Score"),
+                x="Driver Score",
+                y="Feature",
+                orientation="h",
+                color="Direction",
+                title=f"{airline_name}: Top {top_n} Drivers"
+            )
+            st.plotly_chart(fig_driver, use_container_width=True)
+
+            for _, row in scores_display.iterrows():
+                st.markdown(
+                    f"- **{row['Feature']}** | Driver Score: `{row['Driver Score']}` | "
+                    f"{row['Direction']} | Airline Avg: `{row['Airline Avg']}` | Others Avg: `{row['Others Avg']}`"
+                )
+
+        if summary_rows:
+            st.subheader("Airline Driver Summary")
+            for row in summary_rows:
+                st.markdown(
+                    f"**{row['Airline']}** | Strongest Driver: {row['Strongest Driver']} | "
+                    f"Driver Score: {row['Driver Score']}"
+                )
+
+            summary_df = pd.DataFrame(summary_rows)
+            fig_summary = px.bar(
+                summary_df,
+                x="Airline",
+                y="Driver Score",
+                color="Strongest Driver",
+                title="Strongest Driver by Airline"
+            )
+            st.plotly_chart(fig_summary, use_container_width=True)
+
+            heatmap_df = pd.concat(heatmap_rows, ignore_index=True)
+            heatmap_pivot = heatmap_df.pivot(index="Airline", columns="Feature", values="Driver Score").fillna(0)
+
+            st.subheader("Cross-Airline Driver Comparison")
+            fig_heatmap = px.imshow(
+                heatmap_pivot,
+                aspect="auto",
+                color_continuous_scale="Sunset",
+                labels={"x": "Feature", "y": "Airline", "color": "Driver Score"},
+                title="Driver Strength Heatmap"
+            )
+            fig_heatmap.update_xaxes(tickangle=-35)
+            st.plotly_chart(fig_heatmap, use_container_width=True)
