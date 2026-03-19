@@ -106,5 +106,11 @@ The `ML_Engg` folder contains the notebooks used for different stages of the ana
 - `predictive_modelling.ipynb`
 - `segmentation_ready.ipynb`
 
+## Deployment
+The dashboard for this project has been deployed online and can be accessed using the link below:
+
+[Passenger Preference Dashboard](https://naman-y-passenger-preference-analysis-dashboard-r9ow1a.streamlit.app/)
+
+
 ## Summary
 This project presents a business analytics study of passenger behavior in the domestic airline industry. It combines data analysis, customer segmentation, and dashboard-based visualization to support interpretation of passenger preferences and airline-related decision factors.
