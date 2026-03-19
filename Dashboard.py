@@ -594,8 +594,6 @@ elif page == "Airline & Sentiment":
             )
             st.plotly_chart(fig3, use_container_width=True)
 
-        st.warning("`Sentiment_Label` is not present in your combined dataset, so this page uses the available airline, travel class, and loyalty columns instead.")
-
         st.info("""
          Insights:
         • IndiGo and Air India appear most often in recent flown-airline records.
