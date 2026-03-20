@@ -35,6 +35,17 @@ def load_data():
     }
 
     df["Travel_Frequency_Numeric"] = df["Travel_Frequency"].map(mapping)
+    age_mapping = {
+        "18-24": 21,
+        "19-24": 21.5,
+        "25-34": 29.5,
+        "35-44": 39.5,
+        "45-60": 52.5,
+        "60+": 60,
+    }
+    age_series = df["Age"].astype(str).str.strip()
+    df["Age_Numeric"] = age_series.map(age_mapping)
+    df["Age_Numeric"] = pd.to_numeric(df["Age_Numeric"], errors="coerce")
 
     return df
 
@@ -50,6 +61,26 @@ def load_segmentation_data():
 @st.cache_data
 def load_model_ready_data():
     data_path = Path(__file__).resolve().parent / "airline_model_ready.csv"
+    return pd.read_csv(data_path)
+
+
+def resolve_data_path(file_name):
+    base_dir = Path(__file__).resolve().parent
+    candidate_paths = [
+        base_dir / file_name,
+        base_dir.parent / file_name,
+    ]
+
+    for path in candidate_paths:
+        if path.exists():
+            return path
+
+    raise FileNotFoundError(f"{file_name} was not found in {base_dir} or {base_dir.parent}.")
+
+
+@st.cache_data
+def load_phrase_insights_data():
+    data_path = resolve_data_path("airline_phrase_insights.csv")
     return pd.read_csv(data_path)
 
 
@@ -169,7 +200,8 @@ page = st.sidebar.radio(
      "Price & Loyalty",
      "Airline & Sentiment",
      "Customer Segmentation",
-     "Airline-Specific Drivers"]
+     "Airline-Specific Drivers",
+     "Airline Review Drivers"]
 )
 
 # =================================================
@@ -179,19 +211,205 @@ if page == "Overview":
 
     st.subheader("Executive Summary")
 
-    col1, col2, col3 = st.columns(3)
+    overview_col1, overview_col2, overview_col3 = st.columns([1.2, 1, 1])
 
-    col1.metric("Total Passengers", len(df))
+    with overview_col1:
+        selected_classes = st.multiselect(
+            "Travel class filter",
+            options=sorted(df["Travel_Class"].dropna().astype(str).unique().tolist()),
+            default=sorted(df["Travel_Class"].dropna().astype(str).unique().tolist())
+        )
 
-    col2.metric("Avg Travel Frequency",
-                round(df["Travel_Frequency_Numeric"].mean(), 2))
+    with overview_col2:
+        loyalty_filter = st.selectbox(
+            "Loyalty filter",
+            options=["All", "Yes", "No", "Planning to Join"],
+            index=0
+        )
 
-    loyalty_status = df["Loyalty_Program"].astype(str).str.strip().str.lower()
-    loyalty_rate = (loyalty_status == "yes").mean() * 100
-    col3.metric("Loyalty Enrollment %",
-                round(loyalty_rate, 2))
+    with overview_col3:
+        purpose_filter = st.selectbox(
+            "Purpose focus",
+            options=["All", "Business", "Leisure", "Family Visit", "Education", "Medical", "Others"],
+            index=0
+        )
 
-    st.info("Key Insight: Majority passengers fall in mid travel frequency range. Loyalty enrollment is moderate and concentrated in premium travelers.")
+    filtered_df = df.copy()
+
+    if selected_classes:
+        filtered_df = filtered_df[filtered_df["Travel_Class"].astype(str).isin(selected_classes)]
+
+    loyalty_series = filtered_df["Loyalty_Program"].astype(str).str.strip().str.lower()
+    if loyalty_filter != "All":
+        loyalty_map = {
+            "Yes": "yes",
+            "No": "no",
+            "Planning to Join": "planning to join"
+        }
+        filtered_df = filtered_df[loyalty_series == loyalty_map[loyalty_filter]]
+
+    if purpose_filter != "All":
+        purpose_column_map = {
+            "Business": "business",
+            "Leisure": "leisure",
+            "Family Visit": "family_visit",
+            "Education": "education",
+            "Medical": "medical",
+            "Others": "others"
+        }
+        selected_purpose_column = purpose_column_map[purpose_filter]
+        if selected_purpose_column in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df[selected_purpose_column] == 1]
+
+    if filtered_df.empty:
+        st.warning("No passengers match the selected overview filters. Try broadening the filters.")
+    else:
+        filtered_loyalty = filtered_df["Loyalty_Program"].astype(str).str.strip().str.lower()
+        loyalty_rate = (filtered_loyalty == "yes").mean() * 100
+        avg_age = filtered_df["Age_Numeric"].mean()
+        dominant_class = filtered_df["Travel_Class"].mode().iloc[0]
+        dominant_age_band = filtered_df["Age"].mode().iloc[0] if filtered_df["Age"].notna().any() else "N/A"
+
+        freq_labels = {
+            0: "0 flight",
+            1: "1 flight",
+            2.5: "2-3 flights",
+            5: "4-6 flights",
+            8.5: "7-10 flights",
+            12: "More than 10 flight"
+        }
+        avg_frequency_value = filtered_df["Travel_Frequency_Numeric"].mean()
+        closest_frequency = min(freq_labels, key=lambda x: abs(x - avg_frequency_value))
+
+        metric1, metric2, metric3, metric4 = st.columns(4)
+        metric1.metric("Passengers in View", len(filtered_df))
+        metric2.metric("Avg Travel Frequency", f"{avg_frequency_value:.2f}")
+        metric3.metric("Loyalty Enrollment %", f"{loyalty_rate:.2f}")
+        metric4.metric("Average Age Band Midpoint", f"{avg_age:.1f}" if pd.notna(avg_age) else "N/A")
+
+        st.info(
+            f"Current snapshot: `{dominant_class.title()}` is the dominant cabin segment in this filtered view, "
+            f"and travel behavior clusters closest to `{freq_labels[closest_frequency]}` passengers."
+        )
+
+        chart_col1, chart_col2 = st.columns([1.1, 1])
+
+        with chart_col1:
+            frequency_counts = (
+                filtered_df["Travel_Frequency"]
+                .value_counts()
+                .reindex(
+                    ["0 flight", "1 flight", "2-3 flights", "4-6 flights", "7-10 flights", "More than 10 flight"]
+                )
+                .fillna(0)
+                .reset_index()
+            )
+            frequency_counts.columns = ["Travel_Frequency", "Count"]
+
+            fig_freq = px.bar(
+                frequency_counts,
+                x="Travel_Frequency",
+                y="Count",
+                color="Travel_Frequency",
+                title="Travel Frequency Mix"
+            )
+            fig_freq.update_layout(showlegend=False, xaxis_title="", yaxis_title="Passengers")
+            st.plotly_chart(fig_freq, use_container_width=True)
+
+        with chart_col2:
+            class_counts = filtered_df["Travel_Class"].value_counts().reset_index()
+            class_counts.columns = ["Travel_Class", "Count"]
+
+            fig_class = px.pie(
+                class_counts,
+                names="Travel_Class",
+                values="Count",
+                hole=0.55,
+                title="Travel Class Split"
+            )
+            st.plotly_chart(fig_class, use_container_width=True)
+
+        insight_col1, insight_col2 = st.columns(2)
+
+        with insight_col1:
+            purpose_summary = pd.DataFrame({
+                "Purpose": ["Business", "Leisure", "Family Visit", "Education", "Medical", "Others"],
+                "Count": [
+                    filtered_df["business"].sum(),
+                    filtered_df["leisure"].sum(),
+                    filtered_df["family_visit"].sum(),
+                    filtered_df["education"].sum(),
+                    filtered_df["medical"].sum(),
+                    filtered_df["others"].sum()
+                ]
+            }).sort_values("Count", ascending=False)
+
+            fig_purpose = px.bar(
+                purpose_summary,
+                x="Count",
+                y="Purpose",
+                orientation="h",
+                color="Purpose",
+                title="Purpose of Travel Mix"
+            )
+            fig_purpose.update_layout(showlegend=False, yaxis_title="")
+            st.plotly_chart(fig_purpose, use_container_width=True)
+
+        with insight_col2:
+            loyalty_by_class = (
+                filtered_df.groupby(["Travel_Class", "Loyalty_Program"])
+                .size()
+                .reset_index(name="Count")
+            )
+
+            fig_loyalty = px.bar(
+                loyalty_by_class,
+                x="Travel_Class",
+                y="Count",
+                color="Loyalty_Program",
+                barmode="group",
+                title="Loyalty by Travel Class"
+            )
+            st.plotly_chart(fig_loyalty, use_container_width=True)
+
+        st.subheader("Quick Business Readout")
+
+        airline_cols = [col for col in ["indigo", "air_india", "vistara", "spicejet", "akasa"] if col in filtered_df.columns]
+        airline_summary = (
+            filtered_df[airline_cols]
+            .sum()
+            .sort_values(ascending=False)
+            .rename(index={
+                "indigo": "IndiGo",
+                "air_india": "Air India",
+                "vistara": "Vistara",
+                "spicejet": "SpiceJet",
+                "akasa": "Akasa"
+            })
+        )
+
+        summary_text_col1, summary_text_col2 = st.columns(2)
+
+        with summary_text_col1:
+            top_airline = airline_summary.index[0] if not airline_summary.empty else "N/A"
+            top_purpose = purpose_summary.iloc[0]["Purpose"] if not purpose_summary.empty else "N/A"
+            st.markdown(
+                f"- Strongest airline presence in this view: **{top_airline}**\n"
+                f"- Largest trip intent segment: **{top_purpose}**\n"
+                f"- Dominant travel class: **{dominant_class.title()}**"
+            )
+
+        with summary_text_col2:
+            st.markdown(
+                f"- Loyalty penetration in this segment: **{loyalty_rate:.1f}%**\n"
+                f"- Most common age band: **{dominant_age_band}**\n"
+                f"- Average trip frequency signal: **{freq_labels[closest_frequency]}**"
+            )
+
+        st.success(
+            "Business Insight: Use the filters to isolate high-value traveler groups, then compare how loyalty, "
+            "trip purpose, and class mix shift. This makes the overview page a fast segmentation lens before diving deeper."
+        )
 
 # =================================================
 # 2 DEMOGRAPHICS PAGE
@@ -1116,3 +1334,185 @@ elif page == "Airline-Specific Drivers":
             )
             fig_heatmap.update_xaxes(tickangle=-35)
             st.plotly_chart(fig_heatmap, use_container_width=True)
+
+# =================================================
+# 8. AIRLINE REVIEW DRIVERS
+# =================================================
+elif page == "Airline Review Drivers":
+
+    st.subheader("Interactive Airline Review Drivers")
+
+    st.markdown("""
+    Explore airline-specific review themes from `airline_phrase_insights.csv`.
+    This page highlights the strongest **positive drivers**, **negative pain points**, and the
+    business actions each airline should prioritize.
+    """)
+
+    try:
+        df_phrase = load_phrase_insights_data().copy()
+    except FileNotFoundError as exc:
+        st.error(str(exc))
+        st.stop()
+
+    df_phrase["Phrase"] = df_phrase["Phrase"].astype(str).str.strip()
+    df_phrase["Type"] = df_phrase["Type"].astype(str).str.strip().str.title()
+    df_phrase["Airline"] = df_phrase["Airline"].astype(str).str.strip()
+    df_phrase["Airline_Display"] = df_phrase["Airline"].replace({
+        "AirIndia": "Air India",
+        "Indigo": "IndiGo"
+    })
+
+    available_airlines = sorted(df_phrase["Airline_Display"].unique().tolist())
+
+    control_col1, control_col2, control_col3 = st.columns([1.2, 1, 1])
+
+    with control_col1:
+        selected_airline = st.selectbox(
+            "Choose an airline",
+            options=available_airlines,
+            index=available_airlines.index("IndiGo") if "IndiGo" in available_airlines else 0
+        )
+
+    with control_col2:
+        top_n = st.slider("Top phrases per sentiment", min_value=5, max_value=10, value=8)
+
+    with control_col3:
+        compare_mode = st.toggle("Compare across airlines", value=False)
+
+    airline_view = df_phrase[df_phrase["Airline_Display"] == selected_airline].copy()
+    positive_df = (
+        airline_view[airline_view["Type"] == "Positive"]
+        .sort_values("Score", ascending=False)
+        .head(top_n)
+        .copy()
+    )
+    negative_df = (
+        airline_view[airline_view["Type"] == "Negative"]
+        .sort_values("Score", ascending=False)
+        .head(top_n)
+        .copy()
+    )
+
+    pos_total = airline_view.loc[airline_view["Type"] == "Positive", "Score"].sum()
+    neg_total = airline_view.loc[airline_view["Type"] == "Negative", "Score"].sum()
+    net_score = pos_total - neg_total
+
+    metric1, metric2, metric3 = st.columns(3)
+    metric1.metric("Positive Phrase Score", f"{pos_total:.3f}")
+    metric2.metric("Negative Phrase Score", f"{neg_total:.3f}")
+    metric3.metric("Net Review Signal", f"{net_score:.3f}")
+
+    tab1, tab2, tab3 = st.tabs(["Positive Drivers", "Negative Drivers", "Business Insights"])
+
+    with tab1:
+        if positive_df.empty:
+            st.warning(f"No positive phrase data is available for {selected_airline}.")
+        else:
+            fig_positive = px.bar(
+                positive_df.sort_values("Score"),
+                x="Score",
+                y="Phrase",
+                orientation="h",
+                color="Score",
+                color_continuous_scale="Greens",
+                title=f"{selected_airline}: Top Positive Review Drivers"
+            )
+            fig_positive.update_layout(coloraxis_showscale=False)
+            st.plotly_chart(fig_positive, use_container_width=True)
+            st.markdown("**Top positive phrases**")
+            for _, row in positive_df[["Phrase", "Score"]].reset_index(drop=True).iterrows():
+                st.markdown(f"- `{row['Phrase']}` | Score: `{row['Score']:.3f}`")
+
+    with tab2:
+        if negative_df.empty:
+            st.warning(f"No negative phrase data is available for {selected_airline}.")
+        else:
+            fig_negative = px.bar(
+                negative_df.sort_values("Score"),
+                x="Score",
+                y="Phrase",
+                orientation="h",
+                color="Score",
+                color_continuous_scale="Reds",
+                title=f"{selected_airline}: Top Negative Review Drivers"
+            )
+            fig_negative.update_layout(coloraxis_showscale=False)
+            st.plotly_chart(fig_negative, use_container_width=True)
+            st.markdown("**Top negative phrases**")
+            for _, row in negative_df[["Phrase", "Score"]].reset_index(drop=True).iterrows():
+                st.markdown(f"- `{row['Phrase']}` | Score: `{row['Score']:.3f}`")
+
+    with tab3:
+        top_positive_phrases = positive_df["Phrase"].head(3).tolist()
+        top_negative_phrases = negative_df["Phrase"].head(3).tolist()
+
+        st.markdown(f"**Strengths to amplify for {selected_airline}**")
+        if top_positive_phrases:
+            st.write(
+                f"{selected_airline} is winning on themes such as "
+                + ", ".join(top_positive_phrases[:-1] + [top_positive_phrases[-1]])
+                + ". These are the clearest experience signals to reinforce in branding, service training, and repeat-purchase campaigns."
+            )
+        else:
+            st.write("Positive review phrases are too limited to summarize strengths.")
+
+        st.markdown(f"**Pain points to fix for {selected_airline}**")
+        if top_negative_phrases:
+            st.write(
+                f"The biggest friction points center on "
+                + ", ".join(top_negative_phrases[:-1] + [top_negative_phrases[-1]])
+                + ". These issues are most likely to hurt satisfaction, retention, and word-of-mouth if they remain unresolved."
+            )
+        else:
+            st.write("Negative review phrases are too limited to summarize pain points.")
+
+        if neg_total > pos_total:
+            recommendation = (
+                "Negative signals outweigh positive ones, so the priority should be operational recovery: "
+                "fix the most repeated service failures first, then rebuild trust through targeted communication."
+            )
+        else:
+            recommendation = (
+                "Positive signals are stronger overall, so the opportunity is to protect core strengths while "
+                "selectively reducing the highest-impact complaints."
+            )
+
+        st.info(recommendation)
+
+        if top_positive_phrases or top_negative_phrases:
+            st.success(
+                "Business Insight: Use the positive themes as positioning messages, and assign the negative themes "
+                "to operations teams as focused improvement KPIs for each airline."
+            )
+
+    if compare_mode:
+        st.subheader("Cross-Airline Comparison")
+
+        compare_df = (
+            df_phrase.groupby(["Airline_Display", "Type"], as_index=False)["Score"]
+            .sum()
+        )
+
+        fig_compare = px.bar(
+            compare_df,
+            x="Airline_Display",
+            y="Score",
+            color="Type",
+            barmode="group",
+            title="Positive vs Negative Review Signal by Airline",
+            color_discrete_map={"Positive": "#1b9e77", "Negative": "#d95f02"}
+        )
+        st.plotly_chart(fig_compare, use_container_width=True)
+
+        phrase_rank = (
+            df_phrase.sort_values("Score", ascending=False)
+            .groupby(["Airline_Display", "Type"], as_index=False)
+            .head(1)[["Airline_Display", "Type", "Phrase", "Score"]]
+            .sort_values(["Airline_Display", "Type"])
+        )
+        phrase_rank.columns = ["Airline", "Review Type", "Top Phrase", "Score"]
+        st.markdown("**Top phrase by airline and review type**")
+        for _, row in phrase_rank.iterrows():
+            st.markdown(
+                f"- **{row['Airline']}** | {row['Review Type']} | `{row['Top Phrase']}` | Score: `{row['Score']:.3f}`"
+            )
