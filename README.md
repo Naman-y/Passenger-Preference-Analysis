@@ -3,7 +3,7 @@
 ## Project Overview
 This project examines passenger preferences in the domestic airline industry using survey data. The analysis focuses on the factors that influence airline selection, including demographics, travel habits, price sensitivity, loyalty program participation, and service-related preferences.
 
-The project also includes a Streamlit dashboard for presenting the analysis in an interactive format.
+The project also includes a Streamlit dashboard for presenting the analysis in an interactive format. The dashboard now includes an enhanced interactive overview, customer segmentation, airline-specific driver analysis, and airline review phrase insights.
 
 ## Objectives
 - Identify the main factors influencing airline choice
@@ -11,6 +11,7 @@ The project also includes a Streamlit dashboard for presenting the analysis in a
 - Study the relationship between price sensitivity and loyalty
 - Segment passengers based on preference patterns
 - Compare airline-specific drivers of customer choice
+- Surface positive and negative airline review themes
 - Present the findings through a dashboard
 
 ## Project Structure
@@ -20,6 +21,7 @@ Passenger-Preference-Analysis/
 |-- combined_dataset_cleaned.csv
 |-- airline_segmentation_ready.csv
 |-- airline_model_ready.csv
+|-- airline_phrase_insights.csv
 |-- requirements.txt
 |-- Group_3_Airline.pdf
 |-- README.md
@@ -36,13 +38,14 @@ The project uses cleaned and processed survey data stored in CSV format.
 - `combined_dataset_cleaned.csv` for the main dashboard analysis
 - `airline_segmentation_ready.csv` for customer segmentation
 - `airline_model_ready.csv` for airline-specific driver analysis
+- `airline_phrase_insights.csv` for airline-wise positive and negative phrase drivers
 
 ### Dataset Size
 - Main dataset: `2099` rows and `28` columns
 
 ### Key Attributes
 - Gender
-- Age
+- Age band
 - Occupation
 - Purpose of travel
 - Travel frequency
@@ -70,13 +73,21 @@ The project follows the steps below:
 ## Dashboard Sections
 The Streamlit dashboard includes the following sections:
 
-- `Overview`
+- `Overview` with interactive filters, live KPIs, travel mix charts, loyalty comparison, and business readout
 - `Demographics`
 - `Travel Behavior`
 - `Price & Loyalty`
 - `Airline & Sentiment`
 - `Customer Segmentation`
-- `Airline-Specific Drivers`
+- `Airline-Specific Drivers` for one-vs-rest driver comparison using model-ready data
+- `Airline Review Drivers` for airline-wise positive and negative phrase analysis with business insights
+
+## Dashboard Highlights
+- Interactive `Overview` page with travel class, loyalty, and purpose filters
+- KPI cards for passengers, average travel frequency, loyalty enrollment, and age-band midpoint
+- Travel frequency, travel class, purpose, and loyalty charts for quick executive review
+- Interactive airline review page showing positive drivers, negative pain points, and cross-airline phrase comparison
+- Customer segmentation using K-Means and PCA-based visualization
 
 ## Tools and Technologies
 - Python
@@ -113,4 +124,4 @@ The dashboard for this project has been deployed online and can be accessed usin
 
 
 ## Summary
-This project presents a business analytics study of passenger behavior in the domestic airline industry. It combines data analysis, customer segmentation, and dashboard-based visualization to support interpretation of passenger preferences and airline-related decision factors.
+This project presents a business analytics study of passenger behavior in the domestic airline industry. It combines data analysis, customer segmentation, airline driver analysis, and dashboard-based visualization to support interpretation of passenger preferences and airline-related decision factors.
